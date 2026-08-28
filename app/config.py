@@ -51,7 +51,7 @@ settings = Settings(
     ),
     groq_model=os.getenv(
         "GROQ_MODEL",
-        "llama-3.3-70b-versatile",
+        "lopenai/gpt-oss-120b",
     ),
     database_url=os.getenv(
         "DATABASE_URL",
