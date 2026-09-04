@@ -1,3 +1,8 @@
+import os
+from pathlib import Path
+
+from dotenv import dotenv_values
+
 from .ai import ai_provider
 from .config import settings
 from .database import get_history
@@ -52,6 +57,16 @@ Rules:
 - Never claim to have used a tool that was not actually used.
 - Never claim to have searched the web unless a real search was performed.
 """
+
+
+def current_tavily_api_key() -> str:
+    """Read Tavily configuration at request time, including the root .env file."""
+    environment_key = os.getenv("TAVILY_API_KEY", "").strip()
+    if environment_key:
+        return environment_key
+    env_path = Path(__file__).resolve().parent.parent / ".env"
+    file_key = dotenv_values(env_path).get("TAVILY_API_KEY", "")
+    return str(file_key or settings.tavily_api_key).strip()
 
 
 def runtime_identity() -> str:
@@ -224,9 +239,10 @@ async def generate_response(
     )
 
     if use_web:
-        if not settings.tavily_api_key:
+        tavily_api_key = current_tavily_api_key()
+        if not tavily_api_key:
             return "Web search is not configured. Add TAVILY_API_KEY to the .env file.", intent
-        results = await search_web(user_text, settings.tavily_api_key)
+        results = await search_web(user_text, tavily_api_key)
         if not results:
             return "I could not retrieve web results right now. Please try again shortly.", intent
         required_language = "Arabic" if language == "ar" else "English"
