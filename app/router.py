@@ -218,20 +218,41 @@ async def generate_response(
         settings.max_history,
     )
 
-    messages = [{"role": "system", "content": system_prompt}]
-    messages.extend(history)
-    messages.append({"role": "user", "content": user_text})
+    use_web = settings.enable_web_search and (
+        force_web or web_search_for_turn(user_text, history)
+    )
+
+    if use_web:
+        # Compound can reject large payloads with HTTP 413. Web lookups only
+        # need the immediate conversational context, not the full stored chat
+        # or long document/memory content.
+        web_system_prompt = (
+            "You are Nonni. Use your live web tools to answer accurately. "
+            "Reply in the user's language, include the requested dates and units, "
+            "and never say you lack real-time access when tools are available."
+        )
+        messages = [{"role": "system", "content": web_system_prompt}]
+        messages.extend(
+            {
+                "role": message["role"],
+                "content": str(message.get("content", ""))[:1500],
+            }
+            for message in history[-2:]
+            if message.get("role") in {"user", "assistant"}
+        )
+        messages.append({"role": "user", "content": user_text[:3000]})
+    else:
+        messages = [{"role": "system", "content": system_prompt}]
+        messages.extend(history)
+        messages.append({"role": "user", "content": user_text})
 
     response = await ai_provider.chat(
         messages=messages,
         model=(
-            settings.groq_web_model
-            if settings.enable_web_search
-            and (force_web or web_search_for_turn(user_text, history))
-            else settings.groq_model
+            settings.groq_web_model if use_web else settings.groq_model
         ),
         temperature=0.7,
-        max_tokens=4096,
+        max_tokens=1500 if use_web else 4096,
     )
 
     return response, intent

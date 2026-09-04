@@ -71,6 +71,30 @@ class CoreTests(unittest.TestCase):
         history = [{"role": "user", "content": "write a Python function"}]
         self.assertFalse(web_search_for_turn("Amman", history))
 
+    def test_web_request_compacts_large_history(self):
+        async def run_test():
+            history = [
+                {"role": "user", "content": "x" * 10000},
+                {"role": "assistant", "content": "y" * 10000},
+            ]
+            with (
+                patch("app.router.get_history", new=AsyncMock(return_value=history)),
+                patch(
+                    "app.router.get_user_memory_context",
+                    new=AsyncMock(return_value="z" * 10000),
+                ),
+                patch("app.router.ai_provider.chat", new=AsyncMock(return_value="ok")) as chat,
+            ):
+                await generate_response(1, "weather in Amman tomorrow", force_web=True)
+                request = chat.await_args.kwargs
+                total_chars = sum(len(message["content"]) for message in request["messages"])
+                self.assertLess(total_chars, 7000)
+                self.assertEqual(request["max_tokens"], 1500)
+
+        import asyncio
+
+        asyncio.run(run_test())
+
 
 if __name__ == "__main__":
     unittest.main()
