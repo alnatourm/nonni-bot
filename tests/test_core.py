@@ -2,7 +2,7 @@ import unittest
 from unittest.mock import AsyncMock, patch
 
 from app.memory import detect_language
-from app.router import detect_intent, generate_response, runtime_identity
+from app.router import detect_intent, generate_response, needs_web_search, runtime_identity
 from app.telegram_bot import split_message
 
 
@@ -47,6 +47,12 @@ class CoreTests(unittest.TestCase):
         identity = runtime_identity()
         self.assertIn("openai/gpt-oss-120b", identity)
         self.assertIn("Groq", identity)
+
+    def test_live_information_routes_to_web(self):
+        self.assertTrue(needs_web_search("weather in Amman tomorrow"))
+        self.assertTrue(needs_web_search("latest AI news"))
+        self.assertTrue(needs_web_search("طقس عمان غدا"))
+        self.assertFalse(needs_web_search("write a Python function"))
 
 
 if __name__ == "__main__":
