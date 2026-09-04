@@ -1,7 +1,9 @@
 import unittest
+from dataclasses import replace
 from unittest.mock import AsyncMock, patch
 
 from app.memory import detect_language
+from app.config import settings
 from app.router import (
     detect_intent,
     generate_response,
@@ -37,6 +39,7 @@ class CoreTests(unittest.TestCase):
                     new=AsyncMock(return_value=""),
                 ),
                 patch("app.router.ai_provider.chat", new=AsyncMock(return_value="ok")) as chat,
+                patch("app.router.settings", replace(settings, tavily_api_key="test-key")),
                 patch(
                     "app.router.search_web",
                     new=AsyncMock(return_value=[{"title": "Weather", "url": "https://example.com", "snippet": "Sunny"}]),
@@ -88,6 +91,7 @@ class CoreTests(unittest.TestCase):
                     new=AsyncMock(return_value="z" * 10000),
                 ),
                 patch("app.router.ai_provider.chat", new=AsyncMock(return_value="ok")) as chat,
+                patch("app.router.settings", replace(settings, tavily_api_key="test-key")),
                 patch(
                     "app.router.search_web",
                     new=AsyncMock(return_value=[{"title": "Weather", "url": "https://example.com", "snippet": "Sunny"}]),

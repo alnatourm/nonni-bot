@@ -13,6 +13,7 @@ class Settings:
     groq_model: str
     groq_web_model: str
     groq_vision_model: str
+    tavily_api_key: str
 
     database_url: str
 
@@ -78,6 +79,7 @@ settings = Settings(
     ),
     groq_web_model=os.getenv("GROQ_WEB_MODEL", "groq/compound-mini"),
     groq_vision_model=os.getenv("GROQ_VISION_MODEL", "qwen/qwen3.6-27b"),
+    tavily_api_key=os.getenv("TAVILY_API_KEY", ""),
     database_url=os.getenv(
         "DATABASE_URL",
         "sqlite+aiosqlite:///./data/nonni.db",

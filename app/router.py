@@ -224,12 +224,16 @@ async def generate_response(
     )
 
     if use_web:
-        results = await search_web(user_text)
+        if not settings.tavily_api_key:
+            return "Web search is not configured. Add TAVILY_API_KEY to the .env file.", intent
+        results = await search_web(user_text, settings.tavily_api_key)
         if not results:
             return "I could not retrieve web results right now. Please try again shortly.", intent
+        required_language = "Arabic" if language == "ar" else "English"
         web_system_prompt = (
             "You are Nonni. Answer using only the supplied live web results. "
-            "Reply in the user's language. Cite sources using numbered Markdown links. "
+            f"Your entire answer must be in {required_language}. "
+            "Cite sources using numbered Markdown links. "
             "Never invent facts or URLs.\n\nLIVE WEB RESULTS:\n"
             + format_results(results)
         )

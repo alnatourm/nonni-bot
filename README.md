@@ -12,11 +12,11 @@ OpenAI-compatible API and `openai/gpt-oss-120b` by default.
 - Per-user rate limiting, request serialization, and temporary-error retries
 - Optional Telegram user allowlist
 - Commands to clear chat, clear memory, or delete all locally stored user data
-- Live web search and weather through Groq Compound
+- Live web search through Tavily and weather through Open-Meteo
 - Image analysis through `qwen/qwen3.6-27b`
 - Local text extraction from PDF, DOCX, TXT, CSV, Markdown, and JSON files
 
-Web search and vision use the same Groq key; no extra API key is required.
+Web search requires a Tavily API key. The AI response and vision features use Groq.
 
 ## Local setup
 
@@ -33,7 +33,7 @@ Do not commit `.env` or the `data/` directory. They are excluded by the root
 ## Useful settings
 
 - `GROQ_MODEL`: model identifier
-- `GROQ_WEB_MODEL`: live search model (`groq/compound-mini`)
+- `TAVILY_API_KEY`: key used for live web search
 - `GROQ_VISION_MODEL`: image model (`qwen/qwen3.6-27b`)
 - `MAX_HISTORY`: maximum stored chat messages per user
 - `MAX_MEMORY_ITEMS`: maximum saved memories per user
