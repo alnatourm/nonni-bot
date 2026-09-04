@@ -2,7 +2,13 @@ import unittest
 from unittest.mock import AsyncMock, patch
 
 from app.memory import detect_language
-from app.router import detect_intent, generate_response, needs_web_search, runtime_identity
+from app.router import (
+    detect_intent,
+    generate_response,
+    needs_web_search,
+    runtime_identity,
+    web_search_for_turn,
+)
 from app.telegram_bot import split_message
 
 
@@ -53,6 +59,17 @@ class CoreTests(unittest.TestCase):
         self.assertTrue(needs_web_search("latest AI news"))
         self.assertTrue(needs_web_search("طقس عمان غدا"))
         self.assertFalse(needs_web_search("write a Python function"))
+
+    def test_weather_location_follow_up_uses_web(self):
+        history = [
+            {"role": "user", "content": "what is the weather tomorrow?"},
+            {"role": "assistant", "content": "Which city?"},
+        ]
+        self.assertTrue(web_search_for_turn("Amman", history))
+
+    def test_unrelated_follow_up_does_not_use_web(self):
+        history = [{"role": "user", "content": "write a Python function"}]
+        self.assertFalse(web_search_for_turn("Amman", history))
 
 
 if __name__ == "__main__":
