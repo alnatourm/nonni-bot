@@ -33,7 +33,7 @@ Do not commit `.env` or the `data/` directory. They are excluded by the root
 ## Useful settings
 
 - `GROQ_MODEL`: model identifier
-- `GROQ_WEB_MODEL`: live search model (`groq/compound`)
+- `GROQ_WEB_MODEL`: live search model (`groq/compound-mini`)
 - `GROQ_VISION_MODEL`: image model (`qwen/qwen3.6-27b`)
 - `MAX_HISTORY`: maximum stored chat messages per user
 - `MAX_MEMORY_ITEMS`: maximum saved memories per user
