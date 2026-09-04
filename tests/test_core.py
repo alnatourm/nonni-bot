@@ -67,6 +67,11 @@ class CoreTests(unittest.TestCase):
         self.assertTrue(needs_web_search("طقس عمان غدا"))
         self.assertFalse(needs_web_search("write a Python function"))
 
+    def test_tavily_key_can_be_reloaded_from_root_env(self):
+        with patch("app.router.os.getenv", return_value="live-key"):
+            from app.router import current_tavily_api_key
+            self.assertEqual(current_tavily_api_key(), "live-key")
+
     def test_weather_location_follow_up_uses_web(self):
         history = [
             {"role": "user", "content": "what is the weather tomorrow?"},
