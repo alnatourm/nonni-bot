@@ -5,6 +5,7 @@ from .memory import (
     detect_language,
     get_user_memory_context,
 )
+from .web_search import format_results, search_web
 
 
 BASE_PROMPT_AR = """
@@ -223,13 +224,14 @@ async def generate_response(
     )
 
     if use_web:
-        # Compound can reject large payloads with HTTP 413. Web lookups only
-        # need the immediate conversational context, not the full stored chat
-        # or long document/memory content.
+        results = await search_web(user_text)
+        if not results:
+            return "I could not retrieve web results right now. Please try again shortly.", intent
         web_system_prompt = (
-            "You are Nonni. Use your live web tools to answer accurately. "
-            "Reply in the user's language, include the requested dates and units, "
-            "and never say you lack real-time access when tools are available."
+            "You are Nonni. Answer using only the supplied live web results. "
+            "Reply in the user's language. Cite sources using numbered Markdown links. "
+            "Never invent facts or URLs.\n\nLIVE WEB RESULTS:\n"
+            + format_results(results)
         )
         messages = [{"role": "system", "content": web_system_prompt}]
         messages.extend(
@@ -249,7 +251,7 @@ async def generate_response(
     response = await ai_provider.chat(
         messages=messages,
         model=(
-            settings.groq_web_model if use_web else settings.groq_model
+            settings.groq_model
         ),
         temperature=0.7,
         max_tokens=1500 if use_web else 4096,
