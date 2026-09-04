@@ -1,45 +1,48 @@
-import html
-import re
-from xml.etree import ElementTree
-
 import httpx
 
 
-def _plain_text(value: str) -> str:
-    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", html.unescape(value))).strip()
+def _is_news_query(query: str) -> bool:
+    value = query.lower()
+    return any(term in value for term in ("news", "latest", "أخبار", "اخبار", "آخر"))
 
 
-def parse_rss(xml_text: str, limit: int = 5) -> list[dict[str, str]]:
-    root = ElementTree.fromstring(xml_text)
-    results = []
-    for item in root.findall(".//item"):
-        title = _plain_text(item.findtext("title", ""))
-        url = item.findtext("link", "").strip()
-        snippet = _plain_text(item.findtext("description", ""))
-        if title and url.startswith(("http://", "https://")):
-            results.append({"title": title, "url": url, "snippet": snippet})
-        if len(results) >= limit:
-            break
-    return results
-
-
-async def search_web(query: str, limit: int = 5) -> list[dict[str, str]]:
-    """Retrieve live Bing RSS results without an API key."""
+async def search_web(
+    query: str,
+    api_key: str,
+    limit: int = 5,
+) -> list[dict[str, str]]:
+    """Retrieve structured Tavily results for the hybrid search pipeline."""
+    if not api_key:
+        return []
     try:
-        async with httpx.AsyncClient(
-            timeout=20,
-            follow_redirects=True,
-            trust_env=False,
-            headers={"User-Agent": "Mozilla/5.0 NonniBot/2.2"},
-        ) as client:
-            response = await client.get(
-                "https://www.bing.com/search",
-                params={"q": query, "format": "rss"},
+        async with httpx.AsyncClient(timeout=25, follow_redirects=True) as client:
+            response = await client.post(
+                "https://api.tavily.com/search",
+                headers={"Authorization": f"Bearer {api_key}"},
+                json={
+                    "query": query,
+                    "topic": "news" if _is_news_query(query) else "general",
+                    "search_depth": "basic",
+                    "max_results": limit,
+                    "include_answer": False,
+                    "include_raw_content": False,
+                    "include_images": False,
+                    "safe_search": True,
+                },
             )
             response.raise_for_status()
-        return parse_rss(response.text, limit)
-    except (httpx.HTTPError, ElementTree.ParseError):
+            payload = response.json()
+    except (httpx.HTTPError, ValueError):
         return []
+
+    results = []
+    for item in payload.get("results", []):
+        title = str(item.get("title", "")).strip()
+        url = str(item.get("url", "")).strip()
+        content = str(item.get("content", "")).strip()
+        if title and url.startswith(("http://", "https://")):
+            results.append({"title": title, "url": url, "snippet": content[:2000]})
+    return results[:limit]
 
 
 def format_results(results: list[dict[str, str]]) -> str:
