@@ -119,6 +119,25 @@ def needs_web_search(text: str) -> bool:
     return any(term in value for term in current_terms)
 
 
+def web_search_for_turn(user_text: str, history: list[dict[str, str]]) -> bool:
+    """Route current-data questions and their short follow-ups to Compound."""
+    if needs_web_search(user_text):
+        return True
+
+    # A user may ask "what is the weather tomorrow?", receive a request for a
+    # location, and then reply only "Amman". The location alone has no weather
+    # keyword, so preserve the immediately preceding user intent.
+    previous_user_text = next(
+        (
+            str(message.get("content", ""))
+            for message in reversed(history)
+            if message.get("role") == "user"
+        ),
+        "",
+    )
+    return len(user_text) <= 80 and needs_web_search(previous_user_text)
+
+
 def expert_prompt(intent: str) -> str:
     prompts = {
         "coding": """
@@ -207,7 +226,8 @@ async def generate_response(
         messages=messages,
         model=(
             settings.groq_web_model
-            if settings.enable_web_search and (force_web or needs_web_search(user_text))
+            if settings.enable_web_search
+            and (force_web or web_search_for_turn(user_text, history))
             else settings.groq_model
         ),
         temperature=0.7,
