@@ -44,6 +44,7 @@ Do not commit `.env` or the `data/` directory. They are excluded by the root
 - `/memory` — display saved memories
 - `/forget` — delete saved memories
 - `/delete_me` — delete all local data for the requesting user
+- `/model` — display the configured model and provider without AI guessing
 
 ## Data note
 
