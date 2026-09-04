@@ -25,6 +25,8 @@ from .database import (
     save_memory,
     save_message,
 )
+from .documents import SUPPORTED_DOCUMENTS, extract_document
+from .ai import ai_provider
 from .router import generate_response
 
 
@@ -94,7 +96,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/forget - مسح الذاكرة\n"
         "/delete_me - حذف جميع بياناتك المحلية\n\n"
         "/model - عرض نموذج الذكاء الاصطناعي المستخدم\n\n"
-        "هذه النسخة لا تبحث الويب ولا تحلل الصور أو الملفات تلقائيًا."
+        "/web [سؤال] - بحث مباشر في الويب\n"
+        "/weather [مدينة] - الطقس المباشر\n\n"
+        "يمكنك أيضًا إرسال صورة أو ملف PDF/DOCX/TXT/CSV/MD/JSON."
     )
     await update.message.reply_text(text)
 
@@ -161,6 +165,81 @@ async def model_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+async def web_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await ensure_authorized(update):
+        return
+    query = " ".join(context.args).strip()
+    if not query:
+        await update.message.reply_text("اكتب سؤالك بعد /web")
+        return
+    await update.message.chat.send_action(ChatAction.TYPING)
+    response, _ = await generate_response(update.effective_user.id, query, force_web=True)
+    for chunk in split_message(response):
+        await update.message.reply_text(chunk)
+
+
+async def weather_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await ensure_authorized(update):
+        return
+    location = " ".join(context.args).strip()
+    if not location:
+        await update.message.reply_text("اكتب المدينة بعد /weather، مثال: /weather Amman")
+        return
+    query = f"Give the current weather and forecast for {location}. Include dates and units."
+    await update.message.chat.send_action(ChatAction.TYPING)
+    response, _ = await generate_response(update.effective_user.id, query, force_web=True)
+    for chunk in split_message(response):
+        await update.message.reply_text(chunk)
+
+
+async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await ensure_authorized(update) or not settings.enable_documents:
+        return
+    document = update.message.document
+    filename = document.file_name or "document"
+    suffix = "." + filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    if suffix not in SUPPORTED_DOCUMENTS:
+        await update.message.reply_text("نوع الملف غير مدعوم. أرسل PDF أو DOCX أو TXT أو CSV أو MD أو JSON.")
+        return
+    if document.file_size and document.file_size > settings.max_file_size_mb * 1024 * 1024:
+        await update.message.reply_text(f"الملف أكبر من الحد المسموح: {settings.max_file_size_mb} MB")
+        return
+    try:
+        await update.message.chat.send_action(ChatAction.TYPING)
+        telegram_file = await context.bot.get_file(document.file_id)
+        data = bytes(await telegram_file.download_as_bytearray())
+        extracted = extract_document(data, filename, settings.max_document_chars)
+        question = update.message.caption or "Summarize this document and list its key points."
+        response, _ = await generate_response(
+            update.effective_user.id, question, additional_context=extracted
+        )
+        for chunk in split_message(response):
+            await update.message.reply_text(chunk)
+    except Exception as exc:
+        logger.exception("Document analysis failed: %s", exc)
+        await update.message.reply_text("تعذر قراءة الملف. تأكد أنه غير تالف أو محمي بكلمة مرور.")
+
+
+async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await ensure_authorized(update) or not settings.enable_vision:
+        return
+    photo = update.message.photo[-1]
+    if photo.file_size and photo.file_size > settings.max_file_size_mb * 1024 * 1024:
+        await update.message.reply_text(f"الصورة أكبر من الحد المسموح: {settings.max_file_size_mb} MB")
+        return
+    try:
+        await update.message.chat.send_action(ChatAction.TYPING)
+        telegram_file = await context.bot.get_file(photo.file_id)
+        data = bytes(await telegram_file.download_as_bytearray())
+        prompt = update.message.caption or "Describe and analyze this image clearly."
+        response = await ai_provider.vision(data, "image/jpeg", prompt)
+        for chunk in split_message(response):
+            await update.message.reply_text(chunk)
+    except Exception as exc:
+        logger.exception("Image analysis failed: %s", exc)
+        await update.message.reply_text("تعذر تحليل الصورة. حاول بصورة JPG أو PNG أصغر.")
+
+
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
         return
@@ -224,6 +303,10 @@ def create_application():
     application.add_handler(CommandHandler("forget", forget))
     application.add_handler(CommandHandler("delete_me", delete_me))
     application.add_handler(CommandHandler("model", model_cmd))
+    application.add_handler(CommandHandler("web", web_cmd))
+    application.add_handler(CommandHandler("weather", weather_cmd))
+    application.add_handler(MessageHandler(filters.Document.ALL, handle_document))
+    application.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     application.add_handler(
         MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text)
     )
