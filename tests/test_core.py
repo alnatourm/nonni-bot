@@ -2,7 +2,7 @@ import unittest
 from unittest.mock import AsyncMock, patch
 
 from app.memory import detect_language
-from app.router import detect_intent, generate_response
+from app.router import detect_intent, generate_response, runtime_identity
 from app.telegram_bot import split_message
 
 
@@ -42,6 +42,11 @@ class CoreTests(unittest.TestCase):
         import asyncio
 
         asyncio.run(run_test())
+
+    def test_runtime_identity_uses_configuration(self):
+        identity = runtime_identity()
+        self.assertIn("openai/gpt-oss-120b", identity)
+        self.assertIn("Groq", identity)
 
 
 if __name__ == "__main__":
