@@ -76,7 +76,7 @@ settings = Settings(
         "GROQ_MODEL",
         "openai/gpt-oss-120b",
     ),
-    groq_web_model=os.getenv("GROQ_WEB_MODEL", "groq/compound"),
+    groq_web_model=os.getenv("GROQ_WEB_MODEL", "groq/compound-mini"),
     groq_vision_model=os.getenv("GROQ_VISION_MODEL", "qwen/qwen3.6-27b"),
     database_url=os.getenv(
         "DATABASE_URL",
