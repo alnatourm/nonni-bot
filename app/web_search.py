@@ -1,17 +1,30 @@
-from urllib.parse import parse_qs, unquote, urlparse
+import html
+import re
+from xml.etree import ElementTree
 
 import httpx
-from bs4 import BeautifulSoup
 
 
-def _real_url(href: str) -> str:
-    parsed = urlparse(href)
-    target = parse_qs(parsed.query).get("uddg")
-    return unquote(target[0]) if target else href
+def _plain_text(value: str) -> str:
+    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", html.unescape(value))).strip()
+
+
+def parse_rss(xml_text: str, limit: int = 5) -> list[dict[str, str]]:
+    root = ElementTree.fromstring(xml_text)
+    results = []
+    for item in root.findall(".//item"):
+        title = _plain_text(item.findtext("title", ""))
+        url = item.findtext("link", "").strip()
+        snippet = _plain_text(item.findtext("description", ""))
+        if title and url.startswith(("http://", "https://")):
+            results.append({"title": title, "url": url, "snippet": snippet})
+        if len(results) >= limit:
+            break
+    return results
 
 
 async def search_web(query: str, limit: int = 5) -> list[dict[str, str]]:
-    """Retrieve public search-result titles, links and snippets without an API key."""
+    """Retrieve live Bing RSS results without an API key."""
     try:
         async with httpx.AsyncClient(
             timeout=20,
@@ -20,33 +33,13 @@ async def search_web(query: str, limit: int = 5) -> list[dict[str, str]]:
             headers={"User-Agent": "Mozilla/5.0 NonniBot/2.2"},
         ) as client:
             response = await client.get(
-                "https://html.duckduckgo.com/html/",
-                params={"q": query},
+                "https://www.bing.com/search",
+                params={"q": query, "format": "rss"},
             )
             response.raise_for_status()
-    except httpx.HTTPError:
+        return parse_rss(response.text, limit)
+    except (httpx.HTTPError, ElementTree.ParseError):
         return []
-
-    soup = BeautifulSoup(response.text, "html.parser")
-    results = []
-    for result in soup.select(".result"):
-        link = result.select_one(".result__a")
-        if not link:
-            continue
-        url = _real_url(link.get("href", ""))
-        if not url.startswith(("http://", "https://")):
-            continue
-        snippet = result.select_one(".result__snippet")
-        results.append(
-            {
-                "title": link.get_text(" ", strip=True),
-                "url": url,
-                "snippet": snippet.get_text(" ", strip=True) if snippet else "",
-            }
-        )
-        if len(results) >= limit:
-            break
-    return results
 
 
 def format_results(results: list[dict[str, str]]) -> str:
