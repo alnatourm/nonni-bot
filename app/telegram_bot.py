@@ -28,6 +28,7 @@ from .database import (
 from .documents import SUPPORTED_DOCUMENTS, extract_document
 from .ai import ai_provider
 from .router import generate_response
+from .weather import extract_weather_location, get_weather, is_weather_question
 
 
 logger = logging.getLogger("nonni.telegram")
@@ -185,9 +186,8 @@ async def weather_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not location:
         await update.message.reply_text("اكتب المدينة بعد /weather، مثال: /weather Amman")
         return
-    query = f"Give the current weather and forecast for {location}. Include dates and units."
     await update.message.chat.send_action(ChatAction.TYPING)
-    response, _ = await generate_response(update.effective_user.id, query, force_web=True)
+    response = await get_weather(location)
     for chunk in split_message(response):
         await update.message.reply_text(chunk)
 
@@ -251,6 +251,23 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     if len(user_text) > settings.max_message_length:
         await update.message.reply_text("❌ الرسالة طويلة جدًا.")
+        return
+    if context.user_data.pop("awaiting_weather_location", False):
+        await update.message.chat.send_action(ChatAction.TYPING)
+        response = await get_weather(user_text)
+        for chunk in split_message(response):
+            await update.message.reply_text(chunk)
+        return
+    if is_weather_question(user_text):
+        location = extract_weather_location(user_text)
+        if not location:
+            context.user_data["awaiting_weather_location"] = True
+            await update.message.reply_text("Which city or region? مثال: Amman, Jordan")
+            return
+        await update.message.chat.send_action(ChatAction.TYPING)
+        response = await get_weather(location)
+        for chunk in split_message(response):
+            await update.message.reply_text(chunk)
         return
     wait_seconds = rate_limit_remaining(user.id)
     if wait_seconds:
