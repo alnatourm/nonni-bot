@@ -11,6 +11,8 @@ class Settings:
     groq_api_key: str
     groq_base_url: str
     groq_model: str
+    groq_web_model: str
+    groq_vision_model: str
 
     database_url: str
 
@@ -18,7 +20,12 @@ class Settings:
     max_history: int
     max_memory_items: int
     max_message_length: int
+    max_file_size_mb: int
+    max_document_chars: int
     enable_memory: bool
+    enable_web_search: bool
+    enable_documents: bool
+    enable_vision: bool
     requests_per_minute: int
     ai_timeout_seconds: float
     ai_max_retries: int
@@ -69,6 +76,8 @@ settings = Settings(
         "GROQ_MODEL",
         "openai/gpt-oss-120b",
     ),
+    groq_web_model=os.getenv("GROQ_WEB_MODEL", "groq/compound"),
+    groq_vision_model=os.getenv("GROQ_VISION_MODEL", "qwen/qwen3.6-27b"),
     database_url=os.getenv(
         "DATABASE_URL",
         "sqlite+aiosqlite:///./data/nonni.db",
@@ -80,7 +89,12 @@ settings = Settings(
     max_history=env_int("MAX_HISTORY", 20),
     max_memory_items=env_int("MAX_MEMORY_ITEMS", 50),
     max_message_length=env_int("MAX_MESSAGE_LENGTH", 12000),
+    max_file_size_mb=env_int("MAX_FILE_SIZE_MB", 10),
+    max_document_chars=env_int("MAX_DOCUMENT_CHARS", 50000),
     enable_memory=env_bool("ENABLE_MEMORY", True),
+    enable_web_search=env_bool("ENABLE_WEB_SEARCH", True),
+    enable_documents=env_bool("ENABLE_DOCUMENTS", True),
+    enable_vision=env_bool("ENABLE_VISION", True),
     requests_per_minute=env_int("REQUESTS_PER_MINUTE", 10),
     ai_timeout_seconds=float(os.getenv("AI_TIMEOUT_SECONDS", "75")),
     ai_max_retries=env_int("AI_MAX_RETRIES", 3, minimum=0),
