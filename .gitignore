@@ -1,12 +1,16 @@
 .env
 .venv/
+venv/
 __pycache__/
-*.pyc
+*.py[cod]
 
 data/
 *.db
+*.sqlite*
 
+.pytest_cache/
+.coverage
 .idea/
 .vscode/
-
 .DS_Store
+

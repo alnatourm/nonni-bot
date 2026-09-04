@@ -1,4 +1,7 @@
+import asyncio
 import logging
+import time
+from collections import defaultdict, deque
 
 from telegram import Update
 from telegram.constants import ChatAction
@@ -13,156 +16,196 @@ from telegram.ext import (
 from .config import settings
 from .database import (
     clear_history,
+    clear_memories,
+    delete_user_data,
+    get_memories,
     get_or_create_user,
-    save_message,
+    prune_history,
+    prune_memories,
     save_memory,
+    save_message,
 )
-from .memory import detect_language
 from .router import generate_response
 
 
 logger = logging.getLogger("nonni.telegram")
+request_times: dict[int, deque[float]] = defaultdict(deque)
+user_locks: dict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
 
 
-async def start(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE,
-):
+async def ensure_authorized(update: Update) -> bool:
     user = update.effective_user
+    if user and (
+        not settings.allowed_user_ids or user.id in settings.allowed_user_ids
+    ):
+        return True
+    if update.effective_message:
+        await update.effective_message.reply_text(
+            "هذا البوت خاص وغير متاح لهذا الحساب."
+        )
+    return False
 
+
+def rate_limit_remaining(user_id: int) -> int:
+    now = time.monotonic()
+    window = request_times[user_id]
+    while window and now - window[0] >= 60:
+        window.popleft()
+    if len(window) >= settings.requests_per_minute:
+        return max(1, int(60 - (now - window[0])))
+    window.append(now)
+    return 0
+
+
+def split_message(text: str, limit: int = 4096) -> list[str]:
+    """Split at line or space boundaries when possible."""
+    chunks = []
+    remaining = text.strip()
+    while remaining:
+        if len(remaining) <= limit:
+            chunks.append(remaining)
+            break
+        cut = remaining.rfind("\n", 0, limit + 1)
+        if cut < limit // 2:
+            cut = remaining.rfind(" ", 0, limit + 1)
+        if cut < limit // 2:
+            cut = limit
+        chunks.append(remaining[:cut].rstrip())
+        remaining = remaining[cut:].lstrip()
+    return chunks or [""]
+
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await ensure_authorized(update):
+        return
+    user = update.effective_user
     await get_or_create_user(
         telegram_id=user.id,
         first_name=user.first_name,
         username=user.username,
     )
-
     text = (
         f"مرحباً {user.first_name} 👋\n\n"
-        "أنا Nonni 🤖\n\n"
-        "أستطيع مساعدتك في:\n"
-        "💻 البرمجة\n"
-        "💼 الأعمال\n"
-        "📊 تحليل المشاريع\n"
-        "🤖 الذكاء الاصطناعي\n"
-        "🍳 الطبخ\n"
-        "☪️ المعرفة الإسلامية\n"
-        "🌐 العربية والإنجليزية\n\n"
+        "أنا Nonni 🤖، مساعد محادثة نصي بالعربية والإنجليزية.\n\n"
         "الأوامر:\n"
-        "/start - إعادة تشغيل\n"
         "/clear - مسح المحادثة\n"
         "/remember [ملاحظة] - حفظ ملاحظة\n"
-        "/memory - عرض الذاكرة\n\n"
-        "أرسل لي أي سؤال للبدء! 🚀"
+        "/memory - عرض الذاكرة\n"
+        "/forget - مسح الذاكرة\n"
+        "/delete_me - حذف جميع بياناتك المحلية\n\n"
+        "/model - عرض نموذج الذكاء الاصطناعي المستخدم\n\n"
+        "هذه النسخة لا تبحث الويب ولا تحلل الصور أو الملفات تلقائيًا."
     )
-
     await update.message.reply_text(text)
 
 
-async def clear(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE,
-):
-    user = update.effective_user
-    await clear_history(user.id)
+async def clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await ensure_authorized(update):
+        return
+    await clear_history(update.effective_user.id)
     await update.message.reply_text("🧹 تم مسح سجل المحادثة.")
 
 
-async def remember(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE,
-):
+async def remember(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await ensure_authorized(update):
+        return
     user = update.effective_user
-    note = " ".join(context.args) if context.args else ""
-
+    note = " ".join(context.args).strip() if context.args else ""
     if not note:
         await update.message.reply_text("❌ اكتب ما تريد حفظه بعد /remember")
         return
-
-    await save_memory(
-        telegram_user_id=user.id,
-        memory_type="note",
-        content=note,
-        importance=1,
-    )
-
-    await update.message.reply_text(f"✅ تم الحفظ: {note}")
+    if len(note) > 1000:
+        await update.message.reply_text("❌ الملاحظة طويلة جدًا؛ الحد 1000 حرف.")
+        return
+    await save_memory(user.id, "note", note, importance=1)
+    await prune_memories(user.id, settings.max_memory_items)
+    await update.message.reply_text("✅ تم حفظ الملاحظة.")
 
 
-async def memory_cmd(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE,
-):
-    from .database import get_memories
-
-    user = update.effective_user
-    memories = await get_memories(user.id, 20)
-
+async def memory_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await ensure_authorized(update):
+        return
+    memories = await get_memories(update.effective_user.id, settings.max_memory_items)
     if not memories:
         await update.message.reply_text("📭 لا توجد ذاكرة محفوظة.")
         return
-
     lines = ["🧠 ذاكرتك المحفوظة:\n"]
-    for m in memories:
-        lines.append(f"• [{m.memory_type}] {m.content}")
+    lines.extend(f"• [{item.memory_type}] {item.content}" for item in memories)
+    for chunk in split_message("\n".join(lines)):
+        await update.message.reply_text(chunk)
 
-    await update.message.reply_text("\n".join(lines))
+
+async def forget(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await ensure_authorized(update):
+        return
+    await clear_memories(update.effective_user.id)
+    await update.message.reply_text("🧹 تم مسح الذاكرة المحفوظة.")
 
 
-async def handle_text(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE,
-):
+async def delete_me(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await ensure_authorized(update):
+        return
+    user_id = update.effective_user.id
+    await delete_user_data(user_id)
+    request_times.pop(user_id, None)
+    await update.message.reply_text(
+        "✅ تم حذف محادثاتك وذاكرتك وبيانات حسابك المحلية."
+    )
+
+
+async def model_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await ensure_authorized(update):
+        return
+    await update.message.reply_text(
+        "🤖 Model: " + settings.groq_model + "\n⚡ Provider: Groq"
+    )
+
+
+async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
         return
-
+    if not await ensure_authorized(update):
+        return
     user = update.effective_user
     user_text = update.message.text.strip()
-
     if not user_text:
         return
-
     if len(user_text) > settings.max_message_length:
         await update.message.reply_text("❌ الرسالة طويلة جدًا.")
         return
+    wait_seconds = rate_limit_remaining(user.id)
+    if wait_seconds:
+        await update.message.reply_text(
+            f"طلبات كثيرة جدًا. حاول مرة أخرى بعد {wait_seconds} ثانية."
+        )
+        return
 
-    await get_or_create_user(
-        telegram_id=user.id,
-        first_name=user.first_name,
-        username=user.username,
-    )
-
-    await save_message(
-        telegram_user_id=user.id,
-        role="user",
-        content=user_text,
-    )
-
+    await get_or_create_user(user.id, user.first_name, user.username)
     await update.message.chat.send_action(ChatAction.TYPING)
 
     try:
-        response, intent = await generate_response(
-            telegram_user_id=user.id,
-            user_text=user_text,
-        )
+        async with user_locks[user.id]:
+            response, _intent = await generate_response(user.id, user_text)
+            if not response.strip():
+                raise RuntimeError("AI returned an empty response")
 
-        await save_message(
-            telegram_user_id=user.id,
-            role="assistant",
-            content=response,
-        )
+            # Saving happens after generation so the current message is not
+            # duplicated in both history and the new API request.
+            await save_message(user.id, "user", user_text)
+            await save_message(user.id, "assistant", response)
+            await prune_history(user.id, settings.max_history)
 
-        # Telegram message limit is 4096
-        max_length = 4096
-
-        for start in range(0, len(response), max_length):
-            chunk = response[start:start + max_length]
+        for chunk in split_message(response):
             await update.message.reply_text(chunk)
-
     except Exception as exc:
         logger.exception("AI request failed: %s", exc)
         await update.message.reply_text(
             "حدث خطأ أثناء معالجة طلبك. حاول مرة أخرى بعد قليل. 🔄"
         )
+
+
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
+    logger.exception("Unhandled Telegram error", exc_info=context.error)
 
 
 def create_application():
@@ -174,13 +217,15 @@ def create_application():
         .write_timeout(60)
         .build()
     )
-
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("clear", clear))
     application.add_handler(CommandHandler("remember", remember))
     application.add_handler(CommandHandler("memory", memory_cmd))
+    application.add_handler(CommandHandler("forget", forget))
+    application.add_handler(CommandHandler("delete_me", delete_me))
+    application.add_handler(CommandHandler("model", model_cmd))
     application.add_handler(
         MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text)
     )
-
+    application.add_error_handler(error_handler)
     return application

@@ -12,6 +12,13 @@ from app.telegram_bot import create_application
 
 async def post_init(application):
     await init_database()
+    try:
+        os.chmod("data", 0o700)
+        database_path = settings.database_url.removeprefix("sqlite+aiosqlite:///")
+        if settings.database_url.startswith("sqlite+aiosqlite:///"):
+            os.chmod(database_path, 0o600)
+    except (OSError, ValueError):
+        logging.warning("Could not restrict local database file permissions")
 
 
 def main():

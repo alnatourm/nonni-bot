@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import (
     BigInteger,
@@ -6,6 +6,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    delete,
     select,
 )
 from sqlalchemy.ext.asyncio import (
@@ -34,8 +35,12 @@ class User(Base):
     first_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     username: Mapped[str | None] = mapped_column(String(255), nullable=True)
     language: Mapped[str] = mapped_column(String(10), default="en")
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    last_seen: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC)
+    )
+    last_seen: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC)
+    )
 
 
 class Message(Base):
@@ -45,7 +50,9 @@ class Message(Base):
     telegram_user_id: Mapped[int] = mapped_column(BigInteger, index=True)
     role: Mapped[str] = mapped_column(String(20))
     content: Mapped[str] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC)
+    )
 
 
 class Memory(Base):
@@ -56,7 +63,9 @@ class Memory(Base):
     memory_type: Mapped[str] = mapped_column(String(50))
     content: Mapped[str] = mapped_column(Text)
     importance: Mapped[int] = mapped_column(Integer, default=1)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC)
+    )
 
 
 engine = create_async_engine(settings.database_url, echo=False)
@@ -94,7 +103,7 @@ async def get_or_create_user(
         else:
             user.first_name = first_name
             user.username = username
-            user.last_seen = datetime.utcnow()
+            user.last_seen = datetime.now(UTC)
 
         await session.commit()
         return user
@@ -112,6 +121,19 @@ async def save_message(
             content=content,
         )
         session.add(message)
+        await session.commit()
+
+
+async def prune_history(telegram_user_id: int, keep: int):
+    """Keep only the newest messages for one user."""
+    async with SessionLocal() as session:
+        old_ids = (
+            select(Message.id)
+            .where(Message.telegram_user_id == telegram_user_id)
+            .order_by(Message.created_at.desc(), Message.id.desc())
+            .offset(keep)
+        )
+        await session.execute(delete(Message).where(Message.id.in_(old_ids)))
         await session.commit()
 
 
@@ -140,13 +162,34 @@ async def save_memory(
     importance: int = 1,
 ):
     async with SessionLocal() as session:
-        memory = Memory(
-            telegram_user_id=telegram_user_id,
-            memory_type=memory_type,
-            content=content,
-            importance=importance,
+        existing = await session.execute(
+            select(Memory).where(
+                Memory.telegram_user_id == telegram_user_id,
+                Memory.memory_type == memory_type,
+                Memory.content == content,
+            )
         )
-        session.add(memory)
+        if existing.scalar_one_or_none() is None:
+            session.add(
+                Memory(
+                    telegram_user_id=telegram_user_id,
+                    memory_type=memory_type,
+                    content=content,
+                    importance=importance,
+                )
+            )
+        await session.commit()
+
+
+async def prune_memories(telegram_user_id: int, keep: int):
+    async with SessionLocal() as session:
+        old_ids = (
+            select(Memory.id)
+            .where(Memory.telegram_user_id == telegram_user_id)
+            .order_by(Memory.importance.desc(), Memory.created_at.desc(), Memory.id.desc())
+            .offset(keep)
+        )
+        await session.execute(delete(Memory).where(Memory.id.in_(old_ids)))
         await session.commit()
 
 
@@ -166,10 +209,28 @@ async def get_memories(
 
 async def clear_history(telegram_user_id: int):
     async with SessionLocal() as session:
-        result = await session.execute(
-            select(Message).where(Message.telegram_user_id == telegram_user_id)
+        await session.execute(
+            delete(Message).where(Message.telegram_user_id == telegram_user_id)
         )
-        messages = result.scalars().all()
-        for message in messages:
-            await session.delete(message)
+        await session.commit()
+
+
+async def clear_memories(telegram_user_id: int):
+    async with SessionLocal() as session:
+        await session.execute(
+            delete(Memory).where(Memory.telegram_user_id == telegram_user_id)
+        )
+        await session.commit()
+
+
+async def delete_user_data(telegram_user_id: int):
+    """Delete all locally stored data associated with a Telegram user."""
+    async with SessionLocal() as session:
+        await session.execute(
+            delete(Message).where(Message.telegram_user_id == telegram_user_id)
+        )
+        await session.execute(
+            delete(Memory).where(Memory.telegram_user_id == telegram_user_id)
+        )
+        await session.execute(delete(User).where(User.telegram_id == telegram_user_id))
         await session.commit()
