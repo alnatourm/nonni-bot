@@ -93,6 +93,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/memory - عرض الذاكرة\n"
         "/forget - مسح الذاكرة\n"
         "/delete_me - حذف جميع بياناتك المحلية\n\n"
+        "/model - عرض نموذج الذكاء الاصطناعي المستخدم\n\n"
         "هذه النسخة لا تبحث الويب ولا تحلل الصور أو الملفات تلقائيًا."
     )
     await update.message.reply_text(text)
@@ -149,6 +150,14 @@ async def delete_me(update: Update, context: ContextTypes.DEFAULT_TYPE):
     request_times.pop(user_id, None)
     await update.message.reply_text(
         "✅ تم حذف محادثاتك وذاكرتك وبيانات حسابك المحلية."
+    )
+
+
+async def model_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await ensure_authorized(update):
+        return
+    await update.message.reply_text(
+        "🤖 Model: " + settings.groq_model + "\n⚡ Provider: Groq"
     )
 
 
@@ -214,6 +223,7 @@ def create_application():
     application.add_handler(CommandHandler("memory", memory_cmd))
     application.add_handler(CommandHandler("forget", forget))
     application.add_handler(CommandHandler("delete_me", delete_me))
+    application.add_handler(CommandHandler("model", model_cmd))
     application.add_handler(
         MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text)
     )
