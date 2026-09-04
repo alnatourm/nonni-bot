@@ -37,6 +37,10 @@ class CoreTests(unittest.TestCase):
                     new=AsyncMock(return_value=""),
                 ),
                 patch("app.router.ai_provider.chat", new=AsyncMock(return_value="ok")) as chat,
+                patch(
+                    "app.router.search_web",
+                    new=AsyncMock(return_value=[{"title": "Weather", "url": "https://example.com", "snippet": "Sunny"}]),
+                ),
             ):
                 await generate_response(1, "hello once")
                 messages = chat.await_args.kwargs["messages"]
@@ -84,6 +88,10 @@ class CoreTests(unittest.TestCase):
                     new=AsyncMock(return_value="z" * 10000),
                 ),
                 patch("app.router.ai_provider.chat", new=AsyncMock(return_value="ok")) as chat,
+                patch(
+                    "app.router.search_web",
+                    new=AsyncMock(return_value=[{"title": "Weather", "url": "https://example.com", "snippet": "Sunny"}]),
+                ),
             ):
                 await generate_response(1, "weather in Amman tomorrow", force_web=True)
                 request = chat.await_args.kwargs
